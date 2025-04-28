@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WriteRight - Context-Aware Writing Assistant</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <header>
+        <h1>WriteRight</h1>
+        <div class="focus-selector">
+            <span>Focus:</span>
+            <select id="focus-mode">
+                <option value="balanced">Balanced</option>
+                <option value="grammar">Grammar</option>
+                <option value="flow">Flow & Readability</option>
+                <option value="conciseness">Conciseness</option>
+            </select>
+        </div>
+    </header>
+
+    <main>
+        <div class="editor-container">
+            <div id="editor" contenteditable="true" spellcheck="false">
+                Write or paste your text here. I'll analyze it for improvements without changing your ideas.
+            </div>
+        </div>
+        
+        <div class="suggestions-panel">
+            <h2>Suggestions</h2>
+            <div class="filter-options">
+                <button class="filter-btn active" data-filter="all">All</button>
+                <button class="filter-btn" data-filter="critical">Critical</button>
+                <button class="filter-btn" data-filter="suggestion">Suggested</button>
+                <button class="filter-btn" data-filter="optional">Optional</button>
+            </div>
+            <div id="suggestions-list"></div>
+        </div>
+    </main>
+
+    <footer>
+        <p>WriteRight - Refine your writing, preserve your voice</p>
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
