@@ -1,8 +1,7 @@
 // DOM Elements
 const editor = document.getElementById('editor');
-const suggestionsList = document.getElementById('suggestions-list');
-const focusMode = document.getElementById('focus-mode');
-const filterBtns = document.querySelectorAll('.filter-btn');
+// Update to the new container ID for suggestions
+const suggestionsList = document.getElementById('notification-suggestions'); 
 
 // WebSocket connection
 let socket;
@@ -13,20 +12,9 @@ let textHighlights = [];
 
 // Initialize the app
 function init() {
-    // Clear default text on first click
-    editor.addEventListener('focus', function() {
-        if (editor.innerText === 'Write or paste your text here. I\'ll analyze it for improvements without changing your ideas.') {
-            editor.innerText = '';
-        }
-    }, { once: true });
-
     // Setup event listeners
     editor.addEventListener('input', handleTextInput);
-    focusMode.addEventListener('change', handleFocusChange);
-    
-    filterBtns.forEach(btn => {
-        btn.addEventListener('click', handleFilterChange);
-    });
+    // Removed focusMode and filterBtns listeners
 
     // Initialize WebSocket connection
     connectWebSocket();
@@ -75,41 +63,18 @@ function handleTextInput() {
 // Send text to server for analysis
 function sendTextForAnalysis() {
     if (socket && socket.readyState === WebSocket.OPEN) {
+        // Send only the text, focus is removed
         const data = {
-            text: currentText,
-            focus: focusMode.value
+            text: currentText 
         };
         
         socket.send(JSON.stringify(data));
     }
 }
 
-// Handle focus mode change
-function handleFocusChange() {
-    if (currentText.trim().length > 10) {
-        sendTextForAnalysis();
-    }
-}
+// Removed handleFocusChange function
 
-// Handle filter button click
-function handleFilterChange(e) {
-    // Update active button
-    filterBtns.forEach(btn => btn.classList.remove('active'));
-    e.target.classList.add('active');
-    
-    const filter = e.target.dataset.filter;
-    
-    // Filter suggestions list
-    const suggestionItems = document.querySelectorAll('.suggestion-item');
-    
-    suggestionItems.forEach(item => {
-        if (filter === 'all' || item.classList.contains(filter)) {
-            item.style.display = 'block';
-        } else {
-            item.style.display = 'none';
-        }
-    });
-}
+// Removed handleFilterChange function
 
 // Handle WebSocket message
 function handleSocketMessage(data) {
@@ -157,28 +122,28 @@ function createSuggestionItem(suggestion, index) {
     const item = document.createElement('div');
     item.className = `suggestion-item ${suggestion.severity}`;
     item.dataset.index = index;
-    
+    item.dataset.key = suggestionKey(suggestion); // Add key for easy removal
+
+    // Build HTML structure without icons and truncation
     item.innerHTML = `
-        <div class="suggestion-category">${capitalizeFirst(suggestion.category)}</div>
-        <div class="suggestion-original">"${truncateText(suggestion.original)}"</div>
-        <div class="suggestion-replacement">"${truncateText(suggestion.suggestion)}"</div>
-        <div class="suggestion-reason">${suggestion.reason}</div>
         <div class="suggestion-actions">
-            <button class="action-btn ignore">Ignore</button>
-            <button class="action-btn apply">Apply</button>
+            <button class="action-btn apply-btn" title="Apply Suggestion (Dismiss)">✔️</button>
+            <button class="action-btn ignore-btn" title="Ignore Suggestion">❌</button>
+        </div>
+        <div class="suggestion-header">
+            <div class="suggestion-original">"${suggestion.original}"</div>
+        </div>
+        <div class="suggestion-content">
+            <div class="suggestion-hint">"${suggestion.suggestion}"</div>
+            <div class="suggestion-reason">${suggestion.reason}</div>
         </div>
     `;
     
     suggestionsList.appendChild(item);
-    
-    // Add event listeners to buttons
-    item.querySelector('.action-btn.apply').addEventListener('click', () => {
-        applySuggestion(suggestion, index);
-    });
-    
-    item.querySelector('.action-btn.ignore').addEventListener('click', () => {
-        ignoreSuggestion(suggestion, index);
-    });
+
+    // Add event listeners for Apply/Ignore buttons
+    item.querySelector('.apply-btn').addEventListener('click', () => handleApplySuggestion(item, suggestion));
+    item.querySelector('.ignore-btn').addEventListener('click', () => handleIgnoreSuggestion(item, suggestion));
 }
 
 // Highlight text in the editor
@@ -255,10 +220,12 @@ function setupHighlightListeners() {
     document.querySelectorAll('.highlight').forEach(highlight => {
         highlight.addEventListener('click', () => {
             const index = highlight.dataset.index;
-            const suggestionItem = document.querySelector(`.suggestion-item[data-index="${index}"]`);
+            // Query within the new suggestions container
+            const suggestionItem = suggestionsList.querySelector(`.suggestion-item[data-index="${index}"]`); 
             
             if (suggestionItem) {
-                suggestionItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                // Scroll the notification container to show the item
+                suggestionItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); 
                 suggestionItem.classList.add('flashing');
                 setTimeout(() => suggestionItem.classList.remove('flashing'), 1500);
             }
@@ -266,54 +233,39 @@ function setupHighlightListeners() {
     });
 }
 
-// Apply a suggestion
-function applySuggestion(suggestion, index) {
-    // Find the highlight element
-    const highlight = document.querySelector(`.highlight[data-index="${index}"]`);
-    
-    if (highlight) {
-        // Replace the text
-        highlight.innerText = suggestion.suggestion;
-        highlight.classList.remove('highlight', 'critical', 'suggestion', 'optional');
-        
-        // Mark as applied
-        appliedSuggestions.add(suggestionKey(suggestion));
-        
-        // Remove the suggestion item
-        const suggestionItem = document.querySelector(`.suggestion-item[data-index="${index}"]`);
-        if (suggestionItem) {
-            suggestionItem.remove();
-        }
-        
-        // Update current text
-        currentText = editor.innerText;
-        
-        // Analyze text again after a short delay
-        setTimeout(() => {
-            sendTextForAnalysis();
-        }, 1500);
+// Handle Apply Suggestion button click
+function handleApplySuggestion(itemElement, suggestion) {
+    console.log("Apply clicked (currently dismisses):", suggestion);
+    // TODO: Implement actual apply logic IF the user clarifies how it should work with hints.
+    // For now, treat Apply the same as Ignore: dismiss the suggestion visually.
+    appliedSuggestions.add(suggestionKey(suggestion)); // Mark as "applied" (ignored)
+    itemElement.remove(); // Remove the suggestion item from the list
+    // Optionally, remove the corresponding highlight in the editor
+    const highlight = textHighlights.find(h => h.dataset.index === itemElement.dataset.index);
+    if (highlight && highlight.parentNode) {
+         // Just remove the highlight styling/wrapper, keep the text
+         const text = highlight.innerText;
+         const textNode = document.createTextNode(text);
+         highlight.parentNode.replaceChild(textNode, highlight);
+         // Remove from our tracking array
+         textHighlights = textHighlights.filter(h => h !== highlight);
     }
 }
 
-// Ignore a suggestion
-function ignoreSuggestion(suggestion, index) {
-    // Find and remove the highlight
-    const highlight = document.querySelector(`.highlight[data-index="${index}"]`);
-    
-    if (highlight) {
-        // Replace the highlight with its text content
-        const text = highlight.innerText;
-        const textNode = document.createTextNode(text);
-        highlight.parentNode.replaceChild(textNode, highlight);
-    }
-    
-    // Mark as applied (ignored)
-    appliedSuggestions.add(suggestionKey(suggestion));
-    
-    // Remove the suggestion item
-    const suggestionItem = document.querySelector(`.suggestion-item[data-index="${index}"]`);
-    if (suggestionItem) {
-        suggestionItem.remove();
+// Handle Ignore Suggestion button click
+function handleIgnoreSuggestion(itemElement, suggestion) {
+    console.log("Ignore clicked:", suggestion);
+    appliedSuggestions.add(suggestionKey(suggestion)); // Mark as ignored
+    itemElement.remove(); // Remove the suggestion item from the list
+     // Optionally, remove the corresponding highlight in the editor
+    const highlight = textHighlights.find(h => h.dataset.index === itemElement.dataset.index);
+     if (highlight && highlight.parentNode) {
+         // Just remove the highlight styling/wrapper, keep the text
+         const text = highlight.innerText;
+         const textNode = document.createTextNode(text);
+         highlight.parentNode.replaceChild(textNode, highlight);
+         // Remove from our tracking array
+         textHighlights = textHighlights.filter(h => h !== highlight);
     }
 }
 
@@ -330,19 +282,14 @@ function clearSuggestions() {
             highlight.parentNode.replaceChild(textNode, highlight);
         }
     });
-    
+    // Reset ignored suggestions set when clearing all
+    appliedSuggestions.clear(); 
     textHighlights = [];
 }
 
 // Helper function to capitalize first letter
 function capitalizeFirst(str) {
     return str.charAt(0).toUpperCase() + str.slice(1);
-}
-
-// Helper function to truncate text
-function truncateText(text, maxLength = 50) {
-    if (text.length <= maxLength) return text;
-    return text.substring(0, maxLength) + '...';
 }
 
 // Initialize the app when the DOM is loaded

@@ -23,179 +23,186 @@ body {
     line-height: 1.6;
 }
 
-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 1rem 2rem;
-    background-color: var(--panel-color);
-    border-bottom: 1px solid var(--border-color);
-}
-
-h1 {
-    font-size: 1.5rem;
-    color: var(--accent-color);
-}
-
-.focus-selector {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-select {
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    border: 1px solid var(--border-color);
-    font-size: 0.9rem;
-}
-
 main {
-    display: flex;
-    height: calc(100vh - 110px);
+    display: flex; /* Keep flex for potential future sibling elements */
+    height: 100vh; /* Take full viewport height */
 }
 
 .editor-container {
-    flex: 2;
+    flex: 1; /* Take full width */
     padding: 1rem;
     height: 100%;
+    position: relative; /* Needed for positioning the suggestions container */
 }
 
 #editor {
     height: 100%;
     padding: 1.5rem;
-    background-color: var(--panel-color);
-    border-radius: 6px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    background-color: transparent; /* Make background invisible */
+    /* Removed border-radius */
+    /* Removed box-shadow */
     font-size: 1rem;
     line-height: 1.8;
     overflow-y: auto;
     white-space: pre-wrap;
+    /* Add padding-right to prevent text flowing under suggestions */
+    /* 300px (suggestions width) + 1rem (suggestions right offset) + 1rem (extra space) */
+    padding-right: calc(300px + 2rem); 
 }
 
 #editor:focus {
-    outline: 2px solid var(--accent-color);
+    outline: none; /* Remove focus outline */
 }
 
-.suggestions-panel {
-    flex: 1;
-    padding: 1rem;
-    background-color: var(--panel-color);
-    border-left: 1px solid var(--border-color);
-    overflow-y: auto;
-}
-
-.suggestions-panel h2 {
-    margin-bottom: 1rem;
-    font-size: 1.2rem;
-}
-
-.filter-options {
+/* Container for notification-style suggestions */
+#notification-suggestions {
+    position: absolute;
+    top: 1rem; /* Align with editor padding */
+    right: 1rem; /* Align with editor padding */
+    width: 300px; /* Fixed width for notifications */
+    max-height: calc(100% - 2rem); /* Max height with padding */
+    overflow-y: auto; /* Scroll if suggestions overflow */
+    z-index: 10; /* Ensure it's above the editor */
     display: flex;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
-}
-
-.filter-btn {
-    padding: 0.25rem 0.75rem;
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    background: none;
-    font-size: 0.8rem;
-    cursor: pointer;
-}
-
-.filter-btn.active {
-    background-color: var(--accent-color);
-    color: white;
-    border-color: var(--accent-color);
+    flex-direction: column;
+    gap: 0.75rem; /* Spacing between suggestion items */
 }
 
 .suggestion-item {
-    padding: 0.75rem;
-    margin-bottom: 0.75rem;
-    border-radius: 4px;
-    border-left: 3px solid;
-    background-color: rgba(247, 250, 252, 0.5);
+    /* Step 1: Basic Box Structure */
+    background-color: #f5f5f5; /* Soft background */
+    border: 1px solid var(--border-color); /* Subtle border */
+    border-left-width: 4px; /* Keep severity indicator on left */
+    border-radius: 6px; /* Rounded corners */
+    padding: 12px; /* Minimal padding */
     font-size: 0.9rem;
+    position: relative; /* For positioning action buttons */
+    transition: background-color 0.2s ease; /* For hover effect */
+    overflow: hidden; /* Contain elements */
 }
 
+.suggestion-item:hover {
+    background-color: #eeeeee; /* Subtle background change on hover */
+}
+
+.suggestion-item:hover .suggestion-actions {
+    opacity: 1; /* Show actions on hover */
+}
+
+/* Step 4: Color Coding Severity */
 .suggestion-item.critical {
-    border-left-color: #e53e3e;
+    border-left-color: #e53e3e; /* Red */
 }
 
 .suggestion-item.suggestion {
-    border-left-color: #dd6b20;
+    border-left-color: #dd6b20; /* Orange */
 }
 
 .suggestion-item.optional {
-    border-left-color: #38b2ac;
+    border-left-color: #3182ce; /* Blue */
+}
+
+/* Step 2: Suggestion Content Layout */
+.suggestion-header {
+    display: flex;
+    align-items: center;
+    gap: 8px; /* Space between icon and text */
+    margin-bottom: 8px;
+}
+
+.suggestion-icon {
+    font-size: 1.1rem;
+    flex-shrink: 0;
+    /* Color will be set based on severity/category if needed */
+}
+
+.suggestion-content {
+    /* Container for hint/reason */
 }
 
 .highlight {
-    border-radius: 2px;
+    /* Keep cursor and position for click interaction, but remove visual styling */
     cursor: pointer;
-    position: relative;
-    padding: 0 1px;
+    position: relative; 
+    /* Removed border-radius */
+    /* Removed padding */
 }
 
 .highlight.critical {
-    background-color: var(--highlight-critical);
-    border-bottom: 2px dotted #e53e3e;
+    /* Removed background-color */
+    /* Removed border-bottom */
 }
 
 .highlight.suggestion {
-    background-color: var(--highlight-suggestion);
-    border-bottom: 2px dotted #dd6b20;
+    /* Removed background-color */
+    /* Removed border-bottom */
 }
 
 .highlight.optional {
-    background-color: var(--highlight-optional);
-    border-bottom: 2px dotted #38b2ac;
+    /* Removed background-color */
+    /* Removed border-bottom */
 }
 
 .suggestion-original {
     margin-bottom: 0.5rem;
     font-style: italic;
+    color: #555; /* Slightly darker for original text */
 }
 
-.suggestion-replacement {
-    margin-bottom: 0.5rem;
-    color: #2b6cb0;
+.suggestion-hint { /* Renamed from suggestion-replacement */
+    margin-bottom: 8px; /* Spacing */
+    color: var(--text-color); /* Main text color for the hint */
     font-weight: 500;
 }
 
 .suggestion-reason {
-    font-size: 0.85rem;
-    color: #718096;
+    font-size: 0.8rem; /* Slightly smaller */
+    color: #718096; /* Gray text */
+    margin-bottom: 0; /* Remove bottom margin */
 }
 
+/* Step 3: Interactive Elements */
 .suggestion-actions {
+    position: absolute;
+    top: 8px;
+    right: 8px;
     display: flex;
-    justify-content: flex-end;
-    gap: 0.5rem;
-    margin-top: 0.5rem;
+    gap: 6px;
+    opacity: 0; /* Hidden by default */
+    transition: opacity 0.2s ease;
 }
 
 .action-btn {
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    border: 1px solid var(--border-color);
     background: none;
-    font-size: 0.8rem;
+    border: none;
     cursor: pointer;
-}
-
-.action-btn.apply {
-    background-color: var(--accent-color);
-    color: white;
-    border-color: var(--accent-color);
-}
-
-footer {
-    padding: 1rem;
-    text-align: center;
-    font-size: 0.8rem;
+    font-size: 1rem; /* Adjust icon size */
+    padding: 2px;
     color: #718096;
-    border-top: 1px solid var(--border-color);
+    line-height: 1; /* Prevent extra spacing */
 }
+.action-btn:hover {
+    color: var(--text-color);
+}
+
+.apply-btn {
+    /* Style for apply button (e.g., checkmark icon) */
+}
+
+.ignore-btn {
+    /* Style for ignore button (e.g., X icon) */
+}
+
+
+/* Flashing effect for highlight click */
+.suggestion-item.flashing {
+    animation: flash 1.5s ease-out;
+}
+
+@keyframes flash {
+    /* Flash effect: subtly change suggestion box background */
+    0%, 100% { background-color: #f5f5f5; } /* Normal suggestion box background */
+    50% { background-color: #e0e0e0; } /* Slightly darker background for flash */
+}
+
+/* Remove footer styles */

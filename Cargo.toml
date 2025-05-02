@@ -12,4 +12,6 @@ serde_json = "1.0"
 tokio = { version = "1.44.2", features = ["full"] }
 tower = "0.5.2"
 tower-http = { version = "0.6.2", features = ["fs", "cors"] }
+tracing = "0.1.40" # Updated version
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt"] } # Updated version and added fmt feature
 
