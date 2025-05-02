@@ -62,19 +62,9 @@ function handleTextInput() {
 
 // Send text to server for analysis
 function sendTextForAnalysis() {
-    if (socket && socket.readyState === WebSocket.OPEN) {
-        // Send only the text, focus is removed
-        const data = {
-            text: currentText 
-        };
-        
-        socket.send(JSON.stringify(data));
-    }
 }
 
-// Removed handleFocusChange function
 
-// Removed handleFilterChange function
 
 // Handle WebSocket message
 function handleSocketMessage(data) {
@@ -105,11 +95,7 @@ function displaySuggestions(suggestions) {
         }
         
         createSuggestionItem(suggestion, index);
-        highlightText(suggestion, index);
     });
-    
-    // Add click listeners to highlights
-    setupHighlightListeners();
 }
 
 // Create a unique key for a suggestion
@@ -141,60 +127,6 @@ function createSuggestionItem(suggestion, index) {
     
     suggestionsList.appendChild(item);
 
-    // Add event listeners for Apply/Ignore buttons
-    item.querySelector('.apply-btn').addEventListener('click', () => handleApplySuggestion(item, suggestion));
-    item.querySelector('.ignore-btn').addEventListener('click', () => handleIgnoreSuggestion(item, suggestion));
-}
-
-// Highlight text in the editor
-function highlightText(suggestion, index) {
-    // Create a text range for the current content
-    const text = editor.innerText;
-    const range = document.createRange();
-    const textNodes = getTextNodes(editor);
-    
-    // Find the text node and offset for the suggestion
-    let currentIndex = 0;
-    let startNode = null;
-    let startOffset = 0;
-    let endNode = null;
-    let endOffset = 0;
-    
-    // Find the start and end nodes/offsets
-    for (const node of textNodes) {
-        const nodeLength = node.textContent.length;
-        
-        // Find start node and offset
-        if (!startNode && currentIndex + nodeLength > suggestion.start) {
-            startNode = node;
-            startOffset = suggestion.start - currentIndex;
-        }
-        
-        // Find end node and offset
-        if (!endNode && currentIndex + nodeLength >= suggestion.end) {
-            endNode = node;
-            endOffset = suggestion.end - currentIndex;
-            break;
-        }
-        
-        currentIndex += nodeLength;
-    }
-    
-    if (startNode && endNode) {
-        // Create the highlight span
-        const highlight = document.createElement('span');
-        highlight.className = `highlight ${suggestion.severity}`;
-        highlight.dataset.index = index;
-        highlight.title = `Suggestion: ${suggestion.suggestion}`;
-        
-        // Set the range and insert the highlight
-        range.setStart(startNode, startOffset);
-        range.setEnd(endNode, endOffset);
-        range.surroundContents(highlight);
-        
-        // Store highlight reference
-        textHighlights.push(highlight);
-    }
 }
 
 // Get all text nodes within an element
@@ -215,77 +147,6 @@ function getTextNodes(node) {
     return textNodes;
 }
 
-// Setup click listeners for text highlights
-function setupHighlightListeners() {
-    document.querySelectorAll('.highlight').forEach(highlight => {
-        highlight.addEventListener('click', () => {
-            const index = highlight.dataset.index;
-            // Query within the new suggestions container
-            const suggestionItem = suggestionsList.querySelector(`.suggestion-item[data-index="${index}"]`); 
-            
-            if (suggestionItem) {
-                // Scroll the notification container to show the item
-                suggestionItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); 
-                suggestionItem.classList.add('flashing');
-                setTimeout(() => suggestionItem.classList.remove('flashing'), 1500);
-            }
-        });
-    });
-}
-
-// Handle Apply Suggestion button click
-function handleApplySuggestion(itemElement, suggestion) {
-    console.log("Apply clicked (currently dismisses):", suggestion);
-    // TODO: Implement actual apply logic IF the user clarifies how it should work with hints.
-    // For now, treat Apply the same as Ignore: dismiss the suggestion visually.
-    appliedSuggestions.add(suggestionKey(suggestion)); // Mark as "applied" (ignored)
-    itemElement.remove(); // Remove the suggestion item from the list
-    // Optionally, remove the corresponding highlight in the editor
-    const highlight = textHighlights.find(h => h.dataset.index === itemElement.dataset.index);
-    if (highlight && highlight.parentNode) {
-         // Just remove the highlight styling/wrapper, keep the text
-         const text = highlight.innerText;
-         const textNode = document.createTextNode(text);
-         highlight.parentNode.replaceChild(textNode, highlight);
-         // Remove from our tracking array
-         textHighlights = textHighlights.filter(h => h !== highlight);
-    }
-}
-
-// Handle Ignore Suggestion button click
-function handleIgnoreSuggestion(itemElement, suggestion) {
-    console.log("Ignore clicked:", suggestion);
-    appliedSuggestions.add(suggestionKey(suggestion)); // Mark as ignored
-    itemElement.remove(); // Remove the suggestion item from the list
-     // Optionally, remove the corresponding highlight in the editor
-    const highlight = textHighlights.find(h => h.dataset.index === itemElement.dataset.index);
-     if (highlight && highlight.parentNode) {
-         // Just remove the highlight styling/wrapper, keep the text
-         const text = highlight.innerText;
-         const textNode = document.createTextNode(text);
-         highlight.parentNode.replaceChild(textNode, highlight);
-         // Remove from our tracking array
-         textHighlights = textHighlights.filter(h => h !== highlight);
-    }
-}
-
-// Clear all suggestions and highlights
-function clearSuggestions() {
-    // Clear suggestions panel
-    suggestionsList.innerHTML = '';
-    
-    // Remove highlights from text
-    textHighlights.forEach(highlight => {
-        if (highlight.parentNode) {
-            const text = highlight.innerText;
-            const textNode = document.createTextNode(text);
-            highlight.parentNode.replaceChild(textNode, highlight);
-        }
-    });
-    // Reset ignored suggestions set when clearing all
-    appliedSuggestions.clear(); 
-    textHighlights = [];
-}
 
 // Helper function to capitalize first letter
 function capitalizeFirst(str) {

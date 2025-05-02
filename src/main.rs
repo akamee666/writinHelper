@@ -20,9 +20,15 @@ use std::{
     time::Duration,
 };
 use tokio::net::TcpListener;
+use tokio_stream::StreamExt;
 use tower_http::services::ServeDir;
 use tracing::{Level, debug, error, info, warn};
 use tracing_subscriber::FmtSubscriber;
+
+use ollama_rs::{
+    Ollama,
+    models::{LocalModel, pull::PullModelStatus},
+};
 
 // Define CLI arguments using Clap
 #[derive(Parser, Debug)]
@@ -47,25 +53,9 @@ struct Args {
     #[arg(short, long, default_value_t = 3000)]
     port: u16,
 
-    /// Don't auto-start Ollama (assume it's already running)
+    /// List recommended writing-focused models and exit
     ///
-    /// If enabled, the application will not attempt to start the Ollama service
-    /// and will assume it's already running. Use this if you've started
-    /// Ollama manually or it's running as a system service.
-    #[arg(long, default_value_t = false)]
-    no_start_ollama: bool,
-
-    /// Download the model if not available (may take time)
-    ///
-    /// If enabled, the application will automatically download the selected model
-    /// if it's not already available locally. This may take significant time
-    /// depending on the model size and your internet connection.
-    #[arg(long, default_value_t = false)]
-    download_model: bool,
-
-    /// List available writing-focused models and exit
-    ///
-    /// Shows all writing-focused models supported by this application,
+    /// Shows all writing-focused models,
     /// along with their descriptions and approximate sizes. The program
     /// will exit after displaying this information.
     #[arg(long, default_value_t = false)]
@@ -82,8 +72,8 @@ struct Args {
 // Structure to hold application state
 struct AppState {
     client: ReqwestClient,
-    ollama_process: Arc<Mutex<Option<Child>>>,
-    available_models: Arc<Mutex<HashMap<String, ModelInfo>>>,
+    ollama_process: Option<Child>,
+    available_models: HashMap<String, ModelInfo>,
     selected_model: String,
     verbose: bool,
 }
@@ -99,7 +89,7 @@ struct ModelInfo {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse command line arguments
     let args = Args::parse();
     let verbose = args.verbose;
@@ -112,160 +102,112 @@ async fn main() {
 
     info!("Starting Writing Assistant...");
 
-    // Initialize models information
-    let available_models = Arc::new(Mutex::new(HashMap::new()));
+    let ollama = Ollama::default();
+    let models = ollama
+        .list_local_models()
+        .await
+        .map_err(|e| {
+            match e {
+                ollama_rs::error::OllamaError::ReqwestError(_) => {
+                    warn!("Is your Ollama running? Run `ollama serve` and try again.");
+                    error!("Could not connect to Ollama server");
+                }
+                _ => {
+                    error!("Something bad happened when talking to Ollama: {e}");
+                }
+            }
+            e // Return the original error
+        })
+        .unwrap();
 
-    // Define writing-focused models
-    let writing_models = vec![
-        ModelInfo {
-            name: "llama3.2".to_string(),
-            display_name: "Llama 3.2 (8B)".to_string(),
-            description: "General purpose model with good writing capabilities".to_string(),
-            downloaded: false,
-            size_gb: 4.7,
-            writing_focused: true,
-        },
-        ModelInfo {
-            name: "mistral".to_string(),
-            display_name: "Mistral 7B".to_string(),
-            description: "Excellent for grammar and style improvements".to_string(),
-            downloaded: false,
-            size_gb: 4.1,
-            writing_focused: true,
-        },
-        ModelInfo {
-            name: "phi3:mini".to_string(),
-            display_name: "Phi-3 Mini".to_string(),
-            description: "Microsoft's small but capable writing assistant".to_string(),
-            downloaded: false,
-            size_gb: 2.8,
-            writing_focused: true,
-        },
-        ModelInfo {
-            name: "gemma:2b".to_string(),
-            display_name: "Gemma 2B".to_string(),
-            description: "Fast and lightweight for basic writing assistance".to_string(),
-            downloaded: false,
-            size_gb: 1.3,
-            writing_focused: true,
-        },
-        ModelInfo {
-            name: "neural-chat".to_string(),
-            display_name: "Neural Chat".to_string(),
-            description: "Optimized for conversational writing and flow".to_string(),
-            downloaded: false,
-            size_gb: 4.1,
-            writing_focused: true,
-        },
-    ];
+    debug!("Local Models available: {models:?}");
 
-    // Add models to the map
-    {
-        let mut models_map = available_models.lock().unwrap();
-        for model in writing_models {
-            models_map.insert(model.name.clone(), model);
-        }
-    }
+    //         name: "llama3.2".to_string(),
+    //         display_name: "Mistral 7B".to_string(),
+    //         display_name: "Phi-3 Mini".to_string(),
+    //         name: "gemma:2b".to_string(),
+    //         name: "neural-chat".to_string(),
 
-    // If --list-models flag is present, print models and exit
     if args.list_models {
         // Keep println! here as it's direct user output, not logging
-        println!("Available Writing-Focused Models:");
+        println!("Recommended Writing-Focused Models:");
         println!("=================================");
-        let models_map = available_models.lock().unwrap();
-        for (_, model) in models_map.iter() {
-            // Keep println! here
-            println!("{} ({})", model.display_name, model.name);
-            println!("    Description: {}", model.description);
-            println!("    Size: {:.1} GB", model.size_gb);
+        for model in models {
+            // Convert bytes to GB using 1_073_741_824 bytes per GB
+            let size_gb = model.size as f64 / 1_000_000_000.0;
+            println!("{}", model.name);
+            println!("    Size: {:.2} GB", size_gb);
             println!();
         }
-        return;
+        return Ok(());
     }
 
-    // Validate that the selected model exists in our list
-    {
-        let models_map = available_models.lock().unwrap();
-        if !models_map.contains_key(&args.model) {
-            error!(
-                "Model '{}' is not in the list of available models.",
-                args.model
-            );
-            error!("Run with --list-models to see available options.");
-            std::process::exit(1);
-        }
-    }
-
-    // Start Ollama in the background (unless --no-start-ollama is specified)
-    let ollama_process = if !args.no_start_ollama {
-        start_ollama(verbose)
-    } else {
-        info!("Skipping Ollama startup (--no-start-ollama flag provided)");
-        None
-    };
-    let ollama_process = Arc::new(Mutex::new(ollama_process));
-
-    // Create HTTP client
-    let client = ReqwestClient::builder()
-        .timeout(Duration::from_secs(120))
-        .build()
-        .expect("Failed to create HTTP client");
-
-    // Check which models are already downloaded
-    tokio::spawn({
-        let client = client.clone();
-        let models = available_models.clone();
-        async move {
-            // Wait a bit for Ollama to start
-            tokio::time::sleep(Duration::from_secs(3)).await;
-            update_model_status(&client, models, verbose).await;
-        }
+    // Check if the selected model is available locally
+    let model_available = models.iter().any(|m| {
+        // Handle cases with or without ":latest" suffix
+        let base_name = m.name.split(':').next().unwrap_or(&m.name);
+        m.name == args.model || base_name == args.model
     });
 
-    // Download the model if specified
-    if args.download_model {
+    if model_available {
         info!(
-            "Checking if model '{}' needs to be downloaded...",
+            "Model '{}' is already downloaded, starting application.",
             args.model
         );
+    } else {
+        info!("Selected model '{}' is not available locally.", args.model);
 
-        // Wait a bit for the model status to update
-        tokio::time::sleep(Duration::from_secs(4)).await;
+        // Ask user if they want to download the model
+        println!("Would you like to download model '{}'? [y/N]: ", args.model);
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
 
-        let download_needed = {
-            let models_map = available_models.lock().unwrap();
-            if let Some(model_info) = models_map.get(&args.model) {
-                !model_info.downloaded
-            } else {
-                false
-            }
-        };
+        if input.trim().eq_ignore_ascii_case("y") {
+            info!("Downloading model '{}'...", args.model);
 
-        if download_needed {
-            info!("Model '{}' not found locally. Downloading...", args.model);
-            info!(
-                "This may take a while depending on your internet connection and the model size."
-            );
+            // Use pull_model_stream with the correct parameters
+            let mut stream = ollama.pull_model_stream(args.model.clone(), false).await?;
 
-            match Command::new("ollama").arg("pull").arg(&args.model).status() {
-                Ok(status) => {
-                    if status.success() {
-                        info!("Successfully downloaded model '{}'", args.model);
+            println!("Downloading model '{}':", args.model);
 
-                        // Update model status
-                        update_model_status(&client, available_models.clone(), verbose).await;
-                    } else {
-                        error!("Failed to download model. Status: {}", status);
-                        error!("Continuing anyway, but the application may not work correctly.");
+            // Process the stream events to show incremental progress based on PullModelStatus
+            while let Some(result) = stream.next().await {
+                match result {
+                    Ok(status) => {
+                        if let (Some(completed), Some(total)) = (status.completed, status.total) {
+                            if total > 0 {
+                                println!(
+                                    "{}: {:.1}% ({}/{} bytes)",
+                                    status.message,
+                                    (completed as f64 / total as f64) * 100.0,
+                                    completed,
+                                    total
+                                );
+                            } else {
+                                println!("{}", status.message);
+                            }
+                        } else {
+                            println!("{}", status.message);
+                        }
+
+                        if status.message.contains("done") || status.message.contains("success") {
+                            println!("Download completed successfully!");
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to download model: [{}]", args.model);
+                        return Err(e.into());
                     }
                 }
-                Err(e) => {
-                    error!("Error executing ollama pull: {}", e);
-                    error!("Continuing anyway, but the application may not work correctly.");
-                }
             }
+
+            info!("Model [{}] downloaded and ready to use.", args.model);
         } else {
-            info!("Model '{}' is already downloaded.", args.model);
+            info!(
+                "Download cancelled. Please select an available model or download it manually with 'ollama pull {}'",
+                args.model
+            );
+            return Ok(());
         }
     }
 
@@ -273,147 +215,43 @@ async fn main() {
     let current_dir = std::env::current_dir().expect("Failed to get current directory");
     let frontend_path = current_dir.join("frontend");
 
-    debug!("Serving static files from: {}", frontend_path.display());
-
-    // Check if frontend directory exists
-    if !frontend_path.exists() {
-        error!(
-            "Frontend directory not found at: {}",
-            frontend_path.display()
-        );
-        error!("Make sure the 'frontend' directory exists in the current working directory.");
-        std::process::exit(1);
-    }
+    info!("Serving static files from: {}", frontend_path.display());
 
     // Print selected model information
     info!("Using model: {}", args.model);
-
-    // Create shared state
-    let app_state = Arc::new(AppState {
-        client,
-        ollama_process,
-        available_models,
-        selected_model: args.model,
-        verbose,
-    });
 
     // Create a router for our application
     let app = Router::new()
         .route("/ws", get(handle_ws))
         .route("/", get(serve_frontend))
-        .route("/health", get(health_check))
         // Serve static files directly from the frontend directory
-        .nest_service("/static", ServeDir::new(frontend_path))
-        .with_state(app_state);
+        .nest_service("/static", ServeDir::new(frontend_path));
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], args.port));
-    info!("Listening on http://{}", addr);
+    Ok(())
 
-    // Create a TCP listener
-    let listener = match TcpListener::bind(addr).await {
-        Ok(listener) => listener,
-        Err(e) => {
-            error!("Failed to bind to address {}: {}", addr, e);
-            error!("Is another service already running on port {}?", args.port);
-            std::process::exit(1);
-        }
-    };
-
-    info!("Server started successfully!");
-    info!(
-        // Changed from println! to info!
-        "Open your browser and navigate to http://localhost:{}",
-        args.port
-    );
-
+    //
+    // let addr = SocketAddr::from(([127, 0, 0, 1], args.port));
+    // info!("Listening on http://{}", addr);
+    //
+    // // Create a TCP listener
+    // let listener = match TcpListener::bind(addr).await {
+    //     Ok(listener) => listener,
+    //     Err(e) => {
+    //         error!("Failed to bind to address {}: {}", addr, e);
+    //         error!("Is another service already running on port {}?", args.port);
+    //         std::process::exit(1);
+    //     }
+    // };
+    //
+    // info!("Server started successfully!");
+    // info!(
+    //     // Changed from println! to info!
+    //     "Open your browser and navigate to http://localhost:{}",
+    //     args.port
+    // );
+    //
     // Use axum::serve with the listener and app
-    if let Err(e) = serve(listener, app.into_make_service()).await {
-        error!("Server error: {}", e);
-        std::process::exit(1);
-    }
-}
-
-// Start Ollama as a child process
-fn start_ollama(_verbose: bool) -> Option<Child> {
-    // Prefixed verbose with _
-    info!("Starting Ollama server...");
-
-    match Command::new("ollama").arg("serve").spawn() {
-        Ok(child) => {
-            info!("Ollama server started successfully");
-            Some(child)
-        }
-        Err(e) => {
-            if e.kind() == ErrorKind::NotFound {
-                error!("Ollama not found in PATH. Please make sure Ollama is installed.");
-                error!("You can install it from https://ollama.com/download");
-            } else {
-                error!("Failed to start Ollama: {:?}", e);
-                warn!(
-                    // Use warn as it might not be a fatal error if already running
-                    "Is Ollama already running? If so, you can ignore this error or use --no-start-ollama flag."
-                );
-            }
-            None
-        }
-    }
-}
-
-// Health check endpoint for monitoring
-async fn health_check() -> impl IntoResponse {
-    #[derive(Serialize)]
-    struct HealthResponse {
-        status: String,
-        version: String,
-    }
-
-    let health = HealthResponse {
-        status: "ok".to_string(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
-    };
-
-    Json(health)
-}
-
-// Check which models are downloaded
-async fn update_model_status(
-    client: &ReqwestClient,
-    models: Arc<Mutex<HashMap<String, ModelInfo>>>,
-    _verbose: bool, // Prefixed verbose with _
-) {
-    // Try to get list of downloaded models from Ollama
-    match client.get("http://localhost:11434/api/tags").send().await {
-        Ok(response) => {
-            if let Ok(json) = response.json::<serde_json::Value>().await {
-                if let Some(models_array) = json.get("models").and_then(|v| v.as_array()) {
-                    let mut models_map = models.lock().unwrap();
-
-                    // Extract downloaded model names
-                    let downloaded_models: Vec<String> = models_array
-                        .iter()
-                        .filter_map(|m| m.get("name").and_then(|n| n.as_str()).map(String::from))
-                        .collect();
-
-                    // Update downloaded status - Check if any downloaded tag starts with the base name
-                    for (_, model_info) in models_map.iter_mut() {
-                        model_info.downloaded = downloaded_models
-                            .iter()
-                            .any(|downloaded_name| downloaded_name.starts_with(&model_info.name));
-                    }
-
-                    debug!(
-                        "Updated model status. Downloaded models: {:?}",
-                        downloaded_models
-                    );
-                }
-            }
-        }
-        Err(e) => {
-            // Use warn! as failure to update status might not be critical initially
-            warn!("Failed to get model list from Ollama: {:?}", e);
-            warn!("Is Ollama running and accessible at http://localhost:11434?");
-        }
-    }
+    // serve(listener, app.into_make_service()).await;
 }
 
 async fn serve_frontend() -> impl IntoResponse {
@@ -453,8 +291,9 @@ async fn socket_handler(mut socket: WebSocket, state: Arc<AppState>) {
 
                 // Check if the selected model exists and is downloaded
                 let model_available = {
-                    let models = state.available_models.lock().unwrap();
-                    models
+                    // let models = state.available_models.lock().unwrap();
+                    state
+                        .available_models
                         .get(&selected_model) // Use selected_model from state
                         .map(|info| info.downloaded)
                         .unwrap_or(false)
@@ -801,7 +640,7 @@ fn extract_fallback_suggestions(text: &str) -> Vec<TextSuggestion> {
 impl Drop for AppState {
     fn drop(&mut self) {
         // Try to kill the Ollama process if we started it
-        if let Some(mut child) = self.ollama_process.lock().unwrap().take() {
+        if let Some(mut child) = self.ollama_process.take() {
             // Only attempt to kill if we started the process
             info!("Shutting down Ollama process..."); // Changed from println!
 
